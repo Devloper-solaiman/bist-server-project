@@ -56,7 +56,7 @@ async function run() {
             res.send({ token })
         })
 
-        const verifyAdmin = async(req, res, next) => {
+        const verifyAdmin = async (req, res, next) => {
             const email = req.decoded.email;
             const query = { email: email }
             const user = await usersCollection.findOne(query)
@@ -65,12 +65,12 @@ async function run() {
             }
             next();
         }
-        app.get('/users', verifyJWT, verifyAdmin, async(req, res) => {
+        app.get('/users', verifyJWT, verifyAdmin, async (req, res) => {
             const result = await usersCollection.find().toArray();
             res.send(result);
         });
 
-        app.post('/users', async(req, res) => {
+        app.post('/users', async (req, res) => {
             const user = req.body;
             const query = { email: user.email }
             const existingUser = await usersCollection.findOne(query);
@@ -82,7 +82,7 @@ async function run() {
             const result = await usersCollection.insertOne(user);
             res.send(result);
         });
-        app.get('/users/admin/:email', verifyJWT, async(req, res) => {
+        app.get('/users/admin/:email', verifyJWT, async (req, res) => {
             const email = req.params.email;
 
             if (req.decoded.email !== email) {
@@ -97,7 +97,7 @@ async function run() {
         })
 
 
-        app.patch('/users/admin/:id', async(req, res) => {
+        app.patch('/users/admin/:id', async (req, res) => {
             const id = req.params.id;
             console.log(id);
             const filter = { _id: new ObjectId(id) };
@@ -111,18 +111,18 @@ async function run() {
             res.send(result);
         })
 
-        app.get('/menu', async(req, res) => {
+        app.get('/menu', async (req, res) => {
             const result = await menuCollection.find().toArray();
             res.send(result);
         })
 
-        app.post('/menu', verifyJWT, verifyAdmin, async(req, res) => {
+        app.post('/menu', verifyJWT, verifyAdmin, async (req, res) => {
             const newItem = req.body;
             const result = await menuCollection.insertOne(newItem)
             res.send(result)
         })
 
-        app.delete('/menu/:id', verifyJWT, verifyAdmin, async(req, res) => {
+        app.delete('/menu/:id', verifyJWT, verifyAdmin, async (req, res) => {
             const id = req.params.id;
             const query = { _id: new ObjectId(id) }
             const result = await menuCollection.deleteOne(query)
@@ -130,12 +130,12 @@ async function run() {
         })
 
 
-        app.get('/reviews', async(req, res) => {
+        app.get('/reviews', async (req, res) => {
             const result = await reviewCollection.find().toArray();
             res.send(result);
         })
 
-        app.get('/carts', verifyJWT, async(req, res) => {
+        app.get('/carts', verifyJWT, async (req, res) => {
             const email = req.query.email;
             if (!email) {
                 res.send([]);
@@ -149,14 +149,14 @@ async function run() {
             res.send(result);
         });
 
-        app.post('/carts', async(req, res) => {
+        app.post('/carts', async (req, res) => {
             const item = req.body;
             console.log(item);
             const result = await cartCollection.insertOne(item);
             res.send(result);
         })
 
-        app.delete('/carts/:id', async(req, res) => {
+        app.delete('/carts/:id', async (req, res) => {
             const id = req.params.id;
             const query = { _id: new ObjectId(id) };
             const result = await cartCollection.deleteOne(query);
@@ -164,7 +164,7 @@ async function run() {
         })
 
         // create payment intent
-        app.post('/create-payment-intent', verifyJWT, async(req, res) => {
+        app.post('/create-payment-intent', verifyJWT, async (req, res) => {
             const { price } = req.body;
             const amount = parseInt(price * 100);
             const paymentIntent = await stripe.paymentIntents.create({
@@ -179,7 +179,7 @@ async function run() {
         })
 
         // payment releted api 
-        app.post('/payments', verifyJWT, async(req, res) => {
+        app.post('/payments', verifyJWT, async (req, res) => {
             const payment = req.body;
             const insertResult = await paymentCollection.insertOne(payment);
 
@@ -189,6 +189,52 @@ async function run() {
             res.send({ insertResult, deleteResult });
         })
 
+        app.get('/admin-stats', verifyJWT, verifyAdmin, async (req, res) => {
+            const users = await usersCollection.estimatedDocumentCount();
+            const products = await menuCollection.estimatedDocumentCount()
+            const orders = await paymentCollection.estimatedDocumentCount();
+
+            const payments = await paymentCollection.find().toArray();
+            const revenue = payments.reduce((sum, payment) => sum + payment.price, 0)
+            res.send({
+                revenue,
+                users,
+                products,
+                orders
+            })
+        })
+
+        app.get('/order-stats', verifyJWT, verifyAdmin, async (req, res) => {
+            const popeline = [{
+                $lookup: {
+                    from: 'menu',
+                    localField: 'menuItems',
+                    foreignField: '_id',
+                    as: 'menuItemsData'
+                }
+            },
+            {
+                $unwind: '$menuItemsData'
+            },
+            {
+                $group: {
+                    _id: '$menuItemsData.category',
+                    count: { $sum: 1 },
+                    total: { $sum: '$menuItemsData.price' }
+                }
+            },
+            {
+                $project: {
+                    category: '$_id',
+                    count: 1,
+                    total: { $round: ['$total', 2] },
+                    _id: 0
+                }
+            }
+            ];
+            const result = await paymentCollection.aggregate(popeline).toArray()
+            res.send(result)
+        })
         // Send a ping to confirm a successful connection
         await client.db("admin").command({ ping: 1 });
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
